@@ -75,6 +75,9 @@ func (p *PluginState) Handler4(req, resp *dhcpv4.DHCPv4) (*dhcpv4.DHCPv4, bool) 
 	} else {
 		// Ensure we extend the existing lease at least past when the one we're giving expires
 		if record.expires.Before(time.Now().Add(p.LeaseTime)) {
+			if record.Hostname != req.HostName() {
+				record.Hostname = req.HostName()
+			}
 			record.expires = time.Now().Add(p.LeaseTime).Round(time.Second)
 			p.Recordsv4[req.ClientHWAddr.String()] = record
 			err := p.saveState()
