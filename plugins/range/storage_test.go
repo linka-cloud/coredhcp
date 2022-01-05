@@ -15,12 +15,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var leasefile string = `02:00:00:00:00:00 10.0.0.0 2000-01-01T00:00:00Z
-02:00:00:00:00:01 10.0.0.1 2000-01-01T00:00:00Z
-02:00:00:00:00:02 10.0.0.2 2000-01-01T00:00:00Z
-02:00:00:00:00:03 10.0.0.3 2000-01-01T00:00:00Z
-02:00:00:00:00:04 10.0.0.4 2000-01-01T00:00:00Z
-02:00:00:00:00:05 10.0.0.5 2000-01-01T00:00:00Z
+var leasefile string = `02:00:00:00:00:00 10.0.0.0 2000-01-01T00:00:00Z 
+02:00:00:00:00:01 10.0.0.1 2000-01-01T00:00:00Z host1
+02:00:00:00:00:02 10.0.0.2 2000-01-01T00:00:00Z host2
+02:00:00:00:00:03 10.0.0.3 2000-01-01T00:00:00Z host3
+02:00:00:00:00:04 10.0.0.4 2000-01-01T00:00:00Z host4
+02:00:00:00:00:05 10.0.0.5 2000-01-01T00:00:00Z host5
 `
 
 var expire = time.Date(2000, 01, 01, 00, 00, 00, 00, time.UTC)
@@ -28,12 +28,12 @@ var records = []struct {
 	mac string
 	ip  *Record
 }{
-	{"02:00:00:00:00:00", &Record{net.IPv4(10, 0, 0, 0), expire}},
-	{"02:00:00:00:00:01", &Record{net.IPv4(10, 0, 0, 1), expire}},
-	{"02:00:00:00:00:02", &Record{net.IPv4(10, 0, 0, 2), expire}},
-	{"02:00:00:00:00:03", &Record{net.IPv4(10, 0, 0, 3), expire}},
-	{"02:00:00:00:00:04", &Record{net.IPv4(10, 0, 0, 4), expire}},
-	{"02:00:00:00:00:05", &Record{net.IPv4(10, 0, 0, 5), expire}},
+	{mac: "02:00:00:00:00:00", ip: &Record{IP: net.IPv4(10, 0, 0, 0), expires: expire}},
+	{mac: "02:00:00:00:00:01", ip: &Record{Hostname: "host1", IP: net.IPv4(10, 0, 0, 1), expires: expire}},
+	{mac: "02:00:00:00:00:02", ip: &Record{Hostname: "host2", IP: net.IPv4(10, 0, 0, 2), expires: expire}},
+	{mac: "02:00:00:00:00:03", ip: &Record{Hostname: "host3", IP: net.IPv4(10, 0, 0, 3), expires: expire}},
+	{mac: "02:00:00:00:00:04", ip: &Record{Hostname: "host4", IP: net.IPv4(10, 0, 0, 4), expires: expire}},
+	{mac: "02:00:00:00:00:05", ip: &Record{Hostname: "host5", IP: net.IPv4(10, 0, 0, 5), expires: expire}},
 }
 
 func TestLoadRecords(t *testing.T) {
@@ -58,23 +58,20 @@ func TestWriteRecords(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 	defer tmpfile.Close()
 
-	pl := PluginState{}
+	pl := PluginState{
+		Recordsv4: make(map[string]*Record),
+	}
 	if err := pl.registerBackingFile(tmpfile.Name()); err != nil {
 		t.Fatalf("Could not setup file")
 	}
 	defer pl.leasefile.Close()
 
 	for _, rec := range records {
-		hwaddr, err := net.ParseMAC(rec.mac)
-		if err != nil {
-			// bug in testdata
-			panic(err)
-		}
-		if err := pl.saveIPAddress(hwaddr, rec.ip); err != nil {
-			t.Errorf("Failed to save ip for %s: %v", hwaddr, err)
-		}
+		pl.Recordsv4[rec.mac] = rec.ip
 	}
-
+	if err := pl.saveState(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tmpfile.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -84,4 +81,17 @@ func TestWriteRecords(t *testing.T) {
 		t.Fatalf("Could not read back temp file")
 	}
 	assert.Equal(t, leasefile, string(written), "Data written to the file doesn't match records")
+
+	if err := pl.saveState(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tmpfile.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	written, err = ioutil.ReadAll(tmpfile)
+	if err != nil {
+		t.Fatalf("Could not read back temp file")
+	}
+	assert.Equal(t, leasefile, string(written), "Data rewritten to the file doesn't match records")
 }

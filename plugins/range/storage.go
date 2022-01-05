@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,8 +28,8 @@ func loadRecords(r io.Reader) (map[string]*Record, error) {
 			continue
 		}
 		tokens := strings.Fields(line)
-		if len(tokens) != 3 {
-			return nil, fmt.Errorf("malformed line, want 3 fields, got %d: %s", len(tokens), line)
+		if len(tokens) < 3 {
+			return nil, fmt.Errorf("malformed line, want 3 or 4 fields, got %d: %s", len(tokens), line)
 		}
 		hwaddr, err := net.ParseMAC(tokens[0])
 		if err != nil {
@@ -38,11 +39,15 @@ func loadRecords(r io.Reader) (map[string]*Record, error) {
 		if ipaddr.To4() == nil {
 			return nil, fmt.Errorf("expected an IPv4 address, got: %v", ipaddr)
 		}
+		var hostname string
+		if len(tokens) >= 4 {
+			hostname = tokens[3]
+		}
 		expires, err := time.Parse(time.RFC3339, tokens[2])
 		if err != nil {
 			return nil, fmt.Errorf("expected time of exipry in RFC3339 format, got: %v", tokens[2])
 		}
-		records[hwaddr.String()] = &Record{IP: ipaddr, expires: expires}
+		records[hwaddr.String()] = &Record{Hostname: hostname, IP: ipaddr, expires: expires}
 	}
 	return records, nil
 }
@@ -60,17 +65,22 @@ func loadRecordsFromFile(filename string) (map[string]*Record, error) {
 	return loadRecords(reader)
 }
 
-// saveIPAddress writes out a lease to storage
-func (p *PluginState) saveIPAddress(mac net.HardwareAddr, record *Record) error {
-	_, err := p.leasefile.WriteString(mac.String() + " " + record.IP.String() + " " + record.expires.Format(time.RFC3339) + "\n")
-	if err != nil {
+func (p *PluginState) saveState() error {
+	macs := sortedKeys(p.Recordsv4)
+	if _, err := p.leasefile.Seek(0, 0); err != nil {
 		return err
 	}
-	err = p.leasefile.Sync()
-	if err != nil {
+	if err := p.leasefile.Truncate(0); err != nil {
 		return err
 	}
-	return nil
+	for _, mac := range macs {
+		record := p.Recordsv4[mac]
+		_, err := p.leasefile.WriteString(mac + " " + record.IP.String() + " " + record.expires.Format(time.RFC3339) + " " + record.Hostname + "\n")
+		if err != nil {
+			return err
+		}
+	}
+	return p.leasefile.Sync()
 }
 
 // registerBackingFile installs a file as the backing store for leases
@@ -87,4 +97,15 @@ func (p *PluginState) registerBackingFile(filename string) error {
 	}
 	p.leasefile = newLeasefile
 	return nil
+}
+
+func sortedKeys(m map[string]*Record) []string {
+	keys := make([]string, len(m))
+	i := 0
+	for k := range m {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+	return keys
 }

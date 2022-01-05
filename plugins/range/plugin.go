@@ -13,12 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/insomniacslk/dhcp/dhcpv4"
+
 	"github.com/coredhcp/coredhcp/handler"
 	"github.com/coredhcp/coredhcp/logger"
 	"github.com/coredhcp/coredhcp/plugins"
 	"github.com/coredhcp/coredhcp/plugins/allocators"
 	"github.com/coredhcp/coredhcp/plugins/allocators/bitmap"
-	"github.com/insomniacslk/dhcp/dhcpv4"
 )
 
 var log = logger.GetLogger("plugins/range")
@@ -29,10 +30,11 @@ var Plugin = plugins.Plugin{
 	Setup4: setupRange,
 }
 
-//Record holds an IP lease record
+// Record holds an IP lease record
 type Record struct {
-	IP      net.IP
-	expires time.Time
+	Hostname string
+	IP       net.IP
+	expires  time.Time
 }
 
 // PluginState is the data held by an instance of the range plugin
@@ -60,20 +62,22 @@ func (p *PluginState) Handler4(req, resp *dhcpv4.DHCPv4) (*dhcpv4.DHCPv4, bool) 
 			return nil, true
 		}
 		rec := Record{
-			IP:      ip.IP.To4(),
-			expires: time.Now().Add(p.LeaseTime),
+			Hostname: req.HostName(),
+			IP:       ip.IP.To4(),
+			expires:  time.Now().Add(p.LeaseTime),
 		}
-		err = p.saveIPAddress(req.ClientHWAddr, &rec)
+		p.Recordsv4[req.ClientHWAddr.String()] = &rec
+		err = p.saveState()
 		if err != nil {
 			log.Errorf("SaveIPAddress for MAC %s failed: %v", req.ClientHWAddr.String(), err)
 		}
-		p.Recordsv4[req.ClientHWAddr.String()] = &rec
 		record = &rec
 	} else {
 		// Ensure we extend the existing lease at least past when the one we're giving expires
 		if record.expires.Before(time.Now().Add(p.LeaseTime)) {
 			record.expires = time.Now().Add(p.LeaseTime).Round(time.Second)
-			err := p.saveIPAddress(req.ClientHWAddr, record)
+			p.Recordsv4[req.ClientHWAddr.String()] = record
+			err := p.saveState()
 			if err != nil {
 				log.Errorf("Could not persist lease for MAC %s: %v", req.ClientHWAddr.String(), err)
 			}
